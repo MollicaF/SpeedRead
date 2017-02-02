@@ -1,0 +1,30 @@
+Materials and Data for Mollica and Piantadosi (submitted). An incremental information-theoretic buffer supports sentence processing.
+
+Send me an email (mollicaf@gmail.com) for the pre-processed article excerpts used in the task or pre-process them yourself:
+
+Tom Bissell (2008). The grammar of fun. The New Yorker
+Nick Paumgarten (2008). Up and then down. The New Yorker
+Elizabeth Kolbert (2008). The island in the wind. The New Yorker
+Todd Oppenheimer (2008). Sharper. The New Yorker
+
+
+---Inventory---
+
+run.py                - requires Psychopy. Script for presentation and data collection
+Analysis.Rmd          - R markdown with the analysis and figures reported
+bootstrap.R           - separate R file for bootstrapping the First-In, First-Out model predictions (too slow to put in the Rmd)
+mstrap.RData          - R Data file containing the bootstrap samples of the best fit information processing rate (bits/0.147 ms)
+cstrap.RData          - R Data file containing the bootstrap samples of the best fit predicted surprisal weights
+
+Data/
+    contains the raw data files for each participant.
+    *The presenation rate of the monitor for Participant 1 was 7ms per frame (144 Hz refresh rate). The monitor reset for Participants 4-8 and should be excluded from analysis. We resumed numbering at 12.
+
+LM/ # Language Model
+    GrabGoogle.py     - requires ZS. Extracts the relevant unigrams and bigrams from Google Ngrams
+    OptimizeLM.py     - computes the log frequency and bigram surprisal for each word in the stories
+    ngrams.pkl        - python dictionary storing bigram counts
+    nm1grams.pkl      - python dictionary storing unigram counts
+    LangModelOut.csv  - surprisal and log frequency in nats for all words in the story. Format: StoryCode, Position in story, Word, Surprisal, Log Frequency 
+
+

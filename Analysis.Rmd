@@ -1,0 +1,510 @@
+---
+title: "An Incremental Information Theoretic Buffer Supports Sentence Processing"
+author: "F.Mollica"
+date: "February 1, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(plyr)
+library(dplyr)
+library(gdata)
+library(ggplot2)
+library(lme4)
+library(tidyr)
+library(reshape)
+
+# Load in accuracy data
+acc = NULL
+for (f in list.files('Data', full.names=T)) {
+  if (length(grep('ACC', f))) {
+    dat = read.csv(f)
+    dat$Story = trim(dat$Story)
+    dat$ACC = trim(dat$ACC)
+    acc = rbind(acc, dat)
+  }
+}
+
+# Load in reading time data
+data = NULL
+for (f in list.files('Data', full.names=T)) {
+  if (length(grep('RT', f))) {
+    dat = read.csv(f)
+    dat$Story = trim(dat$Story)
+    dat$Mask = trim(dat$Mask)
+    dat$Text = trim(dat$Text)
+    
+    datKey = data.frame(Story=unique(dat$Story)[c(1,5,6,7)], Order=1:4)
+    dat = left_join(dat, datKey)
+    data = rbind(data, dat)
+  }
+}
+
+# Load in the Language Model
+model = read.csv('LM/LangModelOut.csv', header=F)
+colnames(model) = c('Story','Position','Text','Bigram', 'Unigram')
+model$Text = as.character(trim(model$Text))
+model$Length = nchar(model$Text)
+model$Story = as.factor(mapvalues(model$Story, from=c(0,1,2,3), 
+                                  to=c('up', 'sharper', 'island', 'grammar')))
+model$Bigram = model$Bigram/log(2) # Language Model Output was in nats, so we convert it to bits
+
+
+adjust_pos = function(df) {
+  df$Position = seq(0,length(df$Position)-1)
+  return(df[-nrow(df),])
+}
+
+model = ddply(model, .(Story), adjust_pos)
+
+m5 = model %>%
+  mutate(Text=paste(Text, lead(as.character(Text)), lead(as.character(Text), 2),
+                    lead(as.character(Text), 3), lead(as.character(Text), 4)),
+         Bigram2 = lead(Bigram),
+         Bigram3 = lead(Bigram, 2),
+         Bigram4 = lead(Bigram, 3),
+         Bigram5 = lead(Bigram, 4),
+         Unigram2 = lead(Unigram),
+         Unigram3 = lead(Unigram, 2),
+         Unigram4 = lead(Unigram, 3),
+         Unigram5 = lead(Unigram, 4),
+         Length2 = lead(Length),
+         Length3 = lead(Length, 2),
+         Length4 = lead(Length, 3),
+         Length5 = lead(Length, 4)) %>%
+  group_by(Story) %>%
+  filter(Position %% 5 == 0) %>%
+  mutate(Position = seq(0,length(Position)-1)) %>%
+  ungroup()
+
+model$Bigram2 = NA
+model$Bigram3 = NA
+model$Bigram4 = NA
+model$Bigram5 = NA
+model$Unigram2 = NA
+model$Unigram3 = NA
+model$Unigram4 = NA
+model$Unigram5 = NA
+model$resFreq2 = NA
+model$resFreq3 = NA
+model$resFreq4 = NA
+model$resFreq5 = NA
+model$Length2 = NA
+model$Length3 = NA
+model$Length4 = NA
+model$Length5 = NA
+model$PerPress = 1
+m5$PerPress = 5
+
+m=rbind(model, m5) %>%
+  select(-Text)
+
+d = data %>% 
+  filter(Story %in% c('island','grammar','up','sharper'), SubjNo > 11 | SubjNo < 2) %>%  # Removing participants where equiptment malfuncitoned
+  left_join(m)
+
+# Exclusing upper and lower 2.5% of the RT for each subject
+g = d %>%
+  filter(PerPress != 0) %>%
+  group_by(SubjNo) %>%
+  mutate(LQ=quantile(RT, 0.025), HQ=quantile(RT, 0.975)) %>%
+  ungroup() %>%
+  filter(RT <= HQ & RT >= LQ) %>%
+  select(-HQ, -LQ)
+
+# Translating List to Story and Condition
+g$Condition = with(g, ifelse(List=='1' & Story=='grammar', 'Five', 
+                             ifelse(List=='1' & Story=='up',      'nMask',
+                                    ifelse(List=='1' & Story=='sharper', 'Mask',
+                                           ifelse(List=='1' & Story=='island', 'Baseline',
+                                                  ifelse(List=='2' & Story=='grammar', 'Mask',
+                                                         ifelse(List=='2' & Story=='up', 'Baseline',
+                                                                ifelse(List=='2' & Story=='sharper', 'nMask',
+                                                                       ifelse(List=='2' & Story=='island', 'Five',
+                                                                              ifelse(List=='3' & Story=='grammar', 'nMask',
+                                                                                     ifelse(List=='3' & Story=='up', 'Five',
+                                                                                            ifelse(List=='3' & Story=='sharper', 'Baseline',
+                                                                                                   ifelse(List=='3' & Story=='island', 'Mask',
+                                                                                                          ifelse(List=='4' & Story=='grammar', 'Baseline',
+                                                                                                                 ifelse(List=='4' & Story=='up', 'Mask',
+                                                                                                                        ifelse(List=='4' & Story=='sharper', 'Five', 'nMask'))))))))))))))))
+
+acc = subset(acc, SubjNo < 2 | SubjNo > 11) # Removing participants from equiptment malfunction
+acc$ACC = ifelse(acc$ACC=='True', 1, 0)
+
+# Translating List to Story and Condition
+acc$Condition = with(acc, ifelse(List=='1' & Story=='grammar', 'Five', 
+                                 ifelse(List=='1' & Story=='up',      'nMask',
+                                        ifelse(List=='1' & Story=='sharper', 'Mask',
+                                               ifelse(List=='1' & Story=='island', 'Baseline',
+                                                      ifelse(List=='2' & Story=='grammar', 'Mask',
+                                                             ifelse(List=='2' & Story=='up', 'Baseline',
+                                                                    ifelse(List=='2' & Story=='sharper', 'nMask',
+                                                                           ifelse(List=='2' & Story=='island', 'Five',
+                                                                                  ifelse(List=='3' & Story=='grammar', 'nMask',
+                                                                                         ifelse(List=='3' & Story=='up', 'Five',
+                                                                                                ifelse(List=='3' & Story=='sharper', 'Baseline',
+                                                                                                       ifelse(List=='3' & Story=='island', 'Mask',
+                                                                                                              ifelse(List=='4' & Story=='grammar', 'Baseline',
+                                                                                                                     ifelse(List=='4' & Story=='up', 'Mask',
+                                                                                                                            ifelse(List=='4' & Story=='sharper', 'Five', 'nMask'))))))))))))))))
+
+acc = merge(acc, unique(g[,c('SubjNo', 'Story', 'Order')]), all.x=T)
+acc$Order[is.na(acc$Order)] = 1
+acc$Item = paste0(acc$Story,acc$ItemNo)
+
+# Function for calculating R**2
+extent = function(model, data, variable='RT') {
+  d = data.frame(Real = data[,c(variable)])
+  colnames(d) = 'Real'
+  d$Predicted = predict(model, newdata=data)
+  r = with(d, cor.test(d$Real, d$Predicted,na.rm=T))
+  message(paste('R^2 =', round(r$estimate**2, 4)))
+  message(paste('R^2 interval:', round(r$conf.int[1]**2,4), round(r$conf.int[2]**2,4)))
+}
+
+```
+
+## Accuracy Analysis
+
+Are participants understanding the stories in all of the conditions?
+
+```{r acc}
+acc$Condition = reorder.factor(acc$Condition, new.order=c('Baseline','nMask','Mask','Five'))
+acc$Condition = mapvalues(acc$Condition, levels(acc$Condition), c('Baseline','SP','SP-RSVP','5-SP-RSVP'))
+ggplot(acc, aes(Condition, ACC)) +
+  stat_summary(fun.y=mean, geom='point') +
+  stat_summary(fun.data=mean_cl_boot, geom='linerange') +
+  geom_hline(aes(yintercept=0.5), linetype=3) +
+  ylab('Accuracy') + xlab('') +
+  ylim(0, 1) +
+  theme_bw()
+
+#ggsave('Figures/Accuracy.pdf', height=4, width=6)
+
+# To chance
+fit.acc = glmer(ACC ~ -1 +Condition + (1|SubjNo) + (1|Item) + (1|Story) + (1|List), 
+                data=acc, family = binomial(link = "logit"))
+summary(fit.acc)
+
+# To baseline
+fit.acc = glmer(ACC ~ Condition + (1|SubjNo) + (1|Item) + (1|Story) + (1|List), 
+                data=acc, family = binomial(link = "logit"))
+summary(fit.acc)
+```
+
+## Baseline Condition
+
+Is our presentation time faster than each participant's average natural reading pace?
+
+```{r baseline, echo=FALSE}
+ucon = subset(d, PerPress==0)
+
+slen = ddply(model[model$PerPress==1,], .(Story), summarise, slen=length(Text))
+
+ucon = merge(ucon, slen)
+ucon$AvRT = (ucon$RT / ucon$slen)
+
+ggplot(ucon, aes(AvRT)) + 
+  geom_histogram(binwidth=50, fill='green', color='forestgreen') + 
+  scale_x_continuous(breaks=seq(100,1000,by=50), limits = c(100, 1000)) +
+  ylab('Count') + xlab('Average Reading Rate (ms/word)') +
+  theme_bw()
+
+summary(ucon$AvRT)
+sd(ucon$AvRT) / sqrt(length(ucon$AvRT))
+```
+
+## Self-Paced Condition
+
+Do we replicate the effect of surprisal reported in the literature when presentation is central?
+
+```{r sp, echo=FALSE}
+
+nMask = subset(g, Condition=='nMask')
+sp = lmer(RT ~ Unigram + I(-1*Bigram) + I(scale(Length)) + Position + (1|SubjNo) + (1|Story), 
+           data=nMask)
+summary(sp)
+extent(sp, nMask)
+
+```
+
+## Self-Paced RSVP Condition
+
+Do we still see an effect of surprisal when presentation time is limited?
+
+```{r sprsvp, echo=FALSE}
+
+Mask = subset(g, Condition=='Mask')
+sprsvp = lmer(RT ~ Unigram + I(-1*Bigram) + I(scale(Length)) + Position + (1|SubjNo) + (1|Story), 
+           data=Mask)
+summary(sprsvp)
+extent(sprsvp, Mask)
+
+```
+
+## 5 word Self-Paced RSVP Condition
+
+Do we observe a pattern of surprisal effects consistent with a buffer or unbuffered account?
+
+```{r 5sprsvp, echo=FALSE}
+
+Five = subset(g, Condition=='Five')
+
+Five$tBigram = with(Five, Bigram + Bigram2 + Bigram3 + Bigram4 + Bigram5)
+ubuff = lmer(RT ~ I(-1*tBigram) + 
+              Unigram + Unigram2 + Unigram3 + Unigram4 + Unigram5 +
+              I(scale(Length)) + Position + (1|SubjNo) + (1|Story), 
+            data=Five)
+summary(ubuff)
+extent(ubuff, Five)
+
+buff = lmer(RT ~ I(-1*Bigram) + I(-1*Bigram2) + I(-1*Bigram3) + I(-1*Bigram4) + I(-1*Bigram5) + 
+             Unigram + Unigram2 + Unigram3 + Unigram4 + Unigram5 +
+             I(scale(Length)) + Position + (1|SubjNo) + (1|Story), 
+           data=Five)
+summary(buff)
+extent(buff, Five)
+
+anova(ubuff, buff)
+
+```
+
+# Vizualizing Surprisal Weights
+
+```{r visualization}
+
+# SP
+intvs.sp = confint(sp, 'I(-1 * Bigram)', method='boot')
+intvs.sp = data.frame(intvs.sp)
+intvs.sp$Actual = melt(coef(sp)$SubjNo[1,])$value[3]
+intvs.sp$Parameter = rownames(intvs.sp)
+intvs.sp$Position = -1
+intvs.sp$Condition = 'Data'
+
+# SP-RSVP
+intvs.sprsvp = confint(sprsvp, 'I(-1 * Bigram)', method='boot')
+intvs.sprsvp = data.frame(intvs.sprsvp)
+intvs.sprsvp$Actual = melt(coef(sprsvp)$SubjNo[1,])$value[3]
+intvs.sprsvp$Parameter = rownames(intvs.sprsvp)
+intvs.sprsvp$Position = 0
+intvs.sprsvp$Condition = 'Data'
+
+# 5-SP-RSVP
+params = c('I(-1 * Bigram)' , 'I(-1 * Bigram2)' , 'I(-1 * Bigram3)' , 'I(-1 * Bigram4)' , 'I(-1 * Bigram5)' , 
+           'Unigram' , 'Unigram2' , 'Unigram3' , 'Unigram4' , 'Unigram5')
+intvs.buff = confint(buff, params, method="boot")
+intvs.buff = data.frame(intvs.buff)
+intvs.buff$Actual = melt(coef(buff)$SubjNo[1,])$value[2:11]
+intvs.buff$Parameter = rownames(intvs.buff)
+
+intvs.buff = subset(intvs.buff, Parameter %in% c('I(-1 * Bigram)' , 'I(-1 * Bigram2)' , 'I(-1 * Bigram3)' , 'I(-1 * Bigram4)' , 'I(-1 * Bigram5)'))
+intvs.buff$Position=1:5
+intvs.buff$Condition = 'Data'
+
+intvs = rbind(intvs.sp, rbind(intvs.sprsvp, intvs.buff))
+
+ggplot(intvs, aes(Position, Actual, ymax=X97.5.., ymin=X2.5..)) +
+  geom_hline(aes(yintercept=0), linetype=2) +
+  geom_point(position=position_dodge(.9)) +
+  geom_linerange(position=position_dodge(.9)) +
+  geom_vline(aes(xintercept=-.5), linetype=3) +
+  geom_vline(aes(xintercept=.5), linetype=3) +
+  ylab('Surprisal Weight') + xlab('5-SP-RSVP Position') +
+  scale_x_continuous(breaks=-1:5, labels=c('SP', 'SP-RSVP', 1,2,3,4,5)) +
+  theme_bw() +
+  theme(axis.title.x=element_text(size=10, hjust=0.66))
+
+#ggsave('Figures/Data.pdf', width=6, height=3)
+```
+
+# Simple Predictions
+
+```{r predictions}
+# Simplified
+surprisal = data.frame(Position=c(1,2,3,4,5), Beta=c(1,1,1,1,1), Model='(b) Surprisal')
+eye = data.frame(Position=c(1,2,3,4,5), Beta=c(0,0,0,0,0), Model='(a) Eye Movements')
+buffer = data.frame(Position=c(1,2,3,4,5), Beta=c(0,0.5,1,1.5, 2), Model='(c) Linguistic Information Buffer')
+d = rbind(rbind(eye, surprisal), buffer)
+
+ggplot(d, aes(Position, Beta)) +
+  facet_wrap(~Model) +
+  geom_point(shape=3, size=2) +
+  theme_bw() +
+  ylab('Surprisal Weight') +
+  coord_cartesian(ylim=c(-0.25, 2.25))
+
+#ggsave('Figures/SpeedRead_Predictions.pdf', width=8.2, height=3.01)
+
+```
+
+# FIFO Buffer Model
+
+```{r buffer model}
+
+NWORDS <- 5
+L <- NULL
+for(R in seq(0.15, 22.5, 0.3)) {
+  
+  D <- NULL # data frame
+  for(i in 1:nrow(m5)) {
+    
+    procbuf <- rep(NA, NWORDS) # how many bits are left after processing
+    info <- -1*c(m5$Bigram[i], m5$Bigram2[i], m5$Bigram3[i], m5$Bigram4[i], m5$Bigram5[i])
+    info[is.na(info)] = rep(9, length(info[is.na(info)]))
+    
+    for(pos in 1:NWORDS) {
+      procbuf[pos] <- info[pos]
+      
+      # and remove
+      remaining <- R
+      ri <- 1
+      while(remaining > 0 & ri <= pos) {
+        if(procbuf[ri] > remaining) { 
+          procbuf[ri] <- procbuf[ri] - remaining 
+          break
+        }
+        else {
+          remaining <- remaining - procbuf[ri]
+          procbuf[ri] <- 0
+          ri <- ri+1
+        }
+      }
+    }
+    
+    D <- rbind(D, data.frame(w1=info[1], w2=info[2], w3=info[3], w4=info[4], w5=info[5], rt=147*sum(procbuf)/R))
+  }
+  
+  l <- lm(rt ~ -1 + w1 + w2 + w3 + w4 + w5, data=D)
+  
+  L <- rbind(L, c(R, coef(l)))
+}
+
+L = data.frame(L)
+colnames(L)[1] = 'R'
+Lm = melt(L, 'R')
+Lm = subset(Lm, variable != 'X.Intercept.')
+
+Lm$R = (Lm$R / 147)*1000
+
+ggplot(Lm, aes(x=R, y=value, color=variable)) +
+  geom_line() +
+  xlab('Rate of information (bits/sec)') +
+  ylab('Surprisal Weight') +
+  geom_vline(aes(xintercept=25), linetype=3) +
+  geom_vline(aes(xintercept=150), linetype=3) +
+  scale_x_continuous(breaks=seq(25,150,25)) +
+  theme_bw() +
+  theme(legend.title=element_blank()) + coord_cartesian(xlim=c(15,150), ylim=c(-5,50))
+
+#ggsave('Figures/BufferModel.pdf', width=6, height=4)
+```
+
+# Fitting the rate parameter
+
+```{r, buffer fit}
+
+fitcoef = as.vector(coef(buff)$Story[1,2:6])
+
+buffer = function(R, m=Five, NWORDS=5, data=fitcoef) {
+  D = NA
+  residualInfo = NULL
+  for(i in 1:nrow(m)) {
+    procbuf <- rep(NA, NWORDS) # how many bits are left after processing
+    info <- -1*c(m$Bigram[i], m$Bigram2[i], m$Bigram3[i], m$Bigram4[i], m$Bigram5[i])
+    info[is.na(info)] = rep(9, length(info[is.na(info)]))
+    for(pos in 1:NWORDS) {
+      procbuf[pos] <- info[pos]
+      
+      # and remove
+      remaining <- R
+      ri <- 1
+      while(remaining > 0 & ri <= pos) {
+        if(procbuf[ri] > remaining) { 
+          procbuf[ri] <- procbuf[ri] - remaining 
+          break
+        }
+        else {
+          remaining <- remaining - procbuf[ri]
+          procbuf[ri] <- 0
+          ri <- ri+1
+        }
+      }
+    }
+    D = rbind(D, data.frame(w1=info[1], w2=info[2], w3=info[3], w4=info[4], w5=info[5], rt=147*sum(procbuf)/R))
+  }
+  l <- lm(rt ~ -1 + w1 + w2 + w3 + w4 + w5, data=D)
+  sum((coef(l)-data)**2)
+}
+
+o = optim(c(9), buffer, method='L-BFGS-B', lower=c(0))
+
+o
+
+```
+
+# Vizualizing Model and Data
+
+```{r, viz model}
+
+buffer.predict = function(R, m=Five, NWORDS=5) {
+  D = NA
+  residualInfo = NULL
+  for(i in 1:nrow(m)) {
+    procbuf <- rep(NA, NWORDS) # how many bits are left after processing
+    info <- -1*c(m$Bigram[i], m$Bigram2[i], m$Bigram3[i], m$Bigram4[i], m$Bigram5[i])
+    info[is.na(info)] = rep(9, length(info[is.na(info)]))
+    for(pos in 1:NWORDS) {
+      procbuf[pos] <- info[pos]
+      
+      # and remove
+      remaining <- R
+      ri <- 1
+      while(remaining > 0 & ri <= pos) {
+        if(procbuf[ri] > remaining) { 
+          procbuf[ri] <- procbuf[ri] - remaining 
+          break
+        }
+        else {
+          remaining <- remaining - procbuf[ri]
+          procbuf[ri] <- 0
+          ri <- ri+1
+        }
+      }
+    }
+    D = rbind(D, data.frame(w1=info[1], w2=info[2], w3=info[3], w4=info[4], w5=info[5], rt=147*sum(procbuf)/R))
+  }
+  l <- lm(rt ~ -1 + w1 + w2 + w3 + w4 + w5, data=D)
+  coef(l)
+}
+
+p = buffer.predict(o$par)
+
+load('cstrap.RData')
+
+lower = c(quantile(cstrap[,1], 0.025), quantile(cstrap[,2], 0.025), 
+          quantile(cstrap[,3], 0.025), quantile(cstrap[,4], 0.025), quantile(cstrap[,5], 0.025))
+
+upper = c(quantile(cstrap[,1], 0.975), quantile(cstrap[,2], 0.975), 
+          quantile(cstrap[,3], 0.975), quantile(cstrap[,4], 0.975), quantile(cstrap[,5], 0.975))
+
+pred = data.frame(X2.5..=lower, X97.5..=upper, Actual=p, Parameter=NA, Position=as.numeric(1:5), Condition='Model')
+
+ggplot(intvs, aes(Position, Actual, ymax=X97.5.., ymin=X2.5..)) +
+  geom_linerange(data=pred, aes(Position, ymin=X2.5.., ymax=X97.5..), color='red', position=position_nudge(x=0.1), size=1, alpha=0.8) +
+  geom_point(data=pred, aes(Position, Actual), shape=18, color='red3',size=3, position=position_nudge(x=0.1)) +
+  geom_hline(aes(yintercept=0), linetype=2) +
+  geom_point() +
+  geom_linerange(position=position_dodge(.9)) +
+  geom_vline(aes(xintercept=-.5), linetype=3) +
+  geom_vline(aes(xintercept=.5), linetype=3) +
+  ylab('Surprisal Weight') + xlab('5-SP-RSVP Position') +
+  scale_x_continuous(breaks=-1:5, labels=c('SP', 'SP-RSVP', 1,2,3,4,5)) +
+  theme_bw() +
+  theme(axis.title.x=element_text(size=10, hjust=0.66))
+
+#ggsave('Figures/DataNModel.pdf', width=8.2, height=3.01)
+
+```
