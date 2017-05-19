@@ -13,7 +13,6 @@ with open('stories.txt') as f:
 
 google1 = ZS('../../Corpus/cpl-data.ucsd.edu/zs/google-books-20120701/eng-us-all/google-books-eng-us-all-20120701-1gram.zs')
 google2 = ZS('../../Corpus/cpl-data.ucsd.edu/zs/google-books-20120701/eng-us-all/google-books-eng-us-all-20120701-2gram.zs')
-# |V| = 356033418959
 
 
 #  break sentences into strings
@@ -36,14 +35,16 @@ def fetch(ngra, z=google2, zm1=google1):
     ngram_str = " ".join(ngra)
     for record in z.search(prefix=ngram_str):
         entry = record.split()
-        ngram_c += int(entry[3])
+        if entry.split()[1] == ngra[1]:
+            ngram_c += int(entry[3])
     if nm1grams[ngra[0]] > 0:
         nm1gram_c = nm1grams[ngra[0]]
     else:
         nm1gram_c = 0
         for record in zm1.search(prefix=ngra[0]):
             entry = record.split()
-            nm1gram_c += int(entry[2])
+            if entry.split()[0] == ngra[0]:
+                nm1gram_c += int(entry[2])
     return ngram_c, nm1gram_c
 
 ngrams, nm1grams = populate(sample)

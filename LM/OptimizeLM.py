@@ -12,10 +12,10 @@ with open('stories.txt') as f:
         sample.append(l)
 
 N = 356033418959 # US american english v2 google ngrams
-with open('ngrams.pkl', 'r') as f:
+with open('ngramsFixed.pkl', 'r') as f:
     ngrams = pickle.load(f)
 
-with open('nm1grams.pkl', 'r') as f:
+with open('nm1gramsFixed.pkl', 'r') as f:
     nm1grams = pickle.load(f)
 
 nm1grams['_START_'] = float(sum([ ngrams[w] for w in ngrams.keys() if w[0] == '_START_']))
@@ -48,5 +48,5 @@ def calc_prob(sentences, ngra=ngrams, nm1gra=nm1grams, ALPHA=0.1):
 
 result = calc_prob(sample)
 printstring = "\n".join(result)
-with open('LangModelOut.csv', 'w') as f:
+with open('LangModelOut2.csv', 'w') as f:
     f.write(printstring)

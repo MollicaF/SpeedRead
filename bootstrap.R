@@ -80,3 +80,6 @@ for (i in 1:75) {
   cstrap = rbind(cstrap, buffer.pred(o$par))
 }
 #toc()
+
+save(cstrap, file='cstrap.RData')
+save(mstrap, file='mstrap.RData')

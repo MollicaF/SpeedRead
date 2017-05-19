@@ -1,7 +1,7 @@
 ---
-title: "An Incremental Information Theoretic Buffer Supports Sentence Processing"
+title: "Cogsci"
 author: "F.Mollica"
-date: "February 1, 2017"
+date: "May 19, 2017"
 output: html_document
 ---
 
@@ -49,7 +49,7 @@ model$Text = as.character(trim(model$Text))
 model$Length = nchar(model$Text)
 model$Story = as.factor(mapvalues(model$Story, from=c(0,1,2,3), 
                                   to=c('up', 'sharper', 'island', 'grammar')))
-model$Bigram = model$Bigram/log(2) # Language Model Output was in nats, so we convert it to bits
+model$Bigram = model$Bigram/log(2)
 
 
 adjust_pos = function(df) {
@@ -58,6 +58,11 @@ adjust_pos = function(df) {
 }
 
 model = ddply(model, .(Story), adjust_pos)
+
+# Residualize Frequencies for Funsies
+
+res.fit = lm(Unigram ~ I(-1*Bigram), model)
+model$resFreq = residuals(res.fit)
 
 m5 = model %>%
   mutate(Text=paste(Text, lead(as.character(Text)), lead(as.character(Text), 2),
@@ -70,6 +75,10 @@ m5 = model %>%
          Unigram3 = lead(Unigram, 2),
          Unigram4 = lead(Unigram, 3),
          Unigram5 = lead(Unigram, 4),
+         resFreq2 = lead(resFreq),
+         resFreq3 = lead(resFreq, 2),
+         resFreq4 = lead(resFreq, 3),
+         resFreq5 = lead(resFreq, 4),
          Length2 = lead(Length),
          Length3 = lead(Length, 2),
          Length4 = lead(Length, 3),
@@ -102,10 +111,9 @@ m=rbind(model, m5) %>%
   select(-Text)
 
 d = data %>% 
-  filter(Story %in% c('island','grammar','up','sharper'), SubjNo > 11 | SubjNo < 2) %>%  # Removing participants where equiptment malfuncitoned
+  filter(Story %in% c('island','grammar','up','sharper'), SubjNo > 11 | SubjNo < 2) %>%
   left_join(m)
 
-# Exclusing upper and lower 2.5% of the RT for each subject
 g = d %>%
   filter(PerPress != 0) %>%
   group_by(SubjNo) %>%
@@ -114,7 +122,6 @@ g = d %>%
   filter(RT <= HQ & RT >= LQ) %>%
   select(-HQ, -LQ)
 
-# Translating List to Story and Condition
 g$Condition = with(g, ifelse(List=='1' & Story=='grammar', 'Five', 
                              ifelse(List=='1' & Story=='up',      'nMask',
                                     ifelse(List=='1' & Story=='sharper', 'Mask',
@@ -131,10 +138,9 @@ g$Condition = with(g, ifelse(List=='1' & Story=='grammar', 'Five',
                                                                                                                  ifelse(List=='4' & Story=='up', 'Mask',
                                                                                                                         ifelse(List=='4' & Story=='sharper', 'Five', 'nMask'))))))))))))))))
 
-acc = subset(acc, SubjNo < 2 | SubjNo > 11) # Removing participants from equiptment malfunction
+acc = subset(acc, SubjNo < 2 | SubjNo > 11)
 acc$ACC = ifelse(acc$ACC=='True', 1, 0)
 
-# Translating List to Story and Condition
 acc$Condition = with(acc, ifelse(List=='1' & Story=='grammar', 'Five', 
                                  ifelse(List=='1' & Story=='up',      'nMask',
                                         ifelse(List=='1' & Story=='sharper', 'Mask',
@@ -155,7 +161,6 @@ acc = merge(acc, unique(g[,c('SubjNo', 'Story', 'Order')]), all.x=T)
 acc$Order[is.na(acc$Order)] = 1
 acc$Item = paste0(acc$Story,acc$ItemNo)
 
-# Function for calculating R**2
 extent = function(model, data, variable='RT') {
   d = data.frame(Real = data[,c(variable)])
   colnames(d) = 'Real'
@@ -173,7 +178,7 @@ Are participants understanding the stories in all of the conditions?
 
 ```{r acc}
 acc$Condition = reorder.factor(acc$Condition, new.order=c('Baseline','nMask','Mask','Five'))
-acc$Condition = mapvalues(acc$Condition, levels(acc$Condition), c('Baseline','SP','SP-RSVP','5-SP-RSVP'))
+acc$Condition = mapvalues(acc$Condition, levels(acc$Condition), c('Baseline','SP','mSP','5-RSVP'))
 ggplot(acc, aes(Condition, ACC)) +
   stat_summary(fun.y=mean, geom='point') +
   stat_summary(fun.data=mean_cl_boot, geom='linerange') +
@@ -312,8 +317,8 @@ ggplot(intvs, aes(Position, Actual, ymax=X97.5.., ymin=X2.5..)) +
   geom_linerange(position=position_dodge(.9)) +
   geom_vline(aes(xintercept=-.5), linetype=3) +
   geom_vline(aes(xintercept=.5), linetype=3) +
-  ylab('Surprisal Weight') + xlab('5-SP-RSVP Position') +
-  scale_x_continuous(breaks=-1:5, labels=c('SP', 'SP-RSVP', 1,2,3,4,5)) +
+  ylab('Surprisal Weight') + xlab('5-RSVP Position') +
+  scale_x_continuous(breaks=-1:5, labels=c('SP', 'mSP', 1,2,3,4,5)) +
   theme_bw() +
   theme(axis.title.x=element_text(size=10, hjust=0.66))
 
@@ -324,9 +329,9 @@ ggplot(intvs, aes(Position, Actual, ymax=X97.5.., ymin=X2.5..)) +
 
 ```{r predictions}
 # Simplified
-surprisal = data.frame(Position=c(1,2,3,4,5), Beta=c(1,1,1,1,1), Model='(b) Surprisal')
-eye = data.frame(Position=c(1,2,3,4,5), Beta=c(0,0,0,0,0), Model='(a) Eye Movements')
-buffer = data.frame(Position=c(1,2,3,4,5), Beta=c(0,0.5,1,1.5, 2), Model='(c) Linguistic Information Buffer')
+surprisal = data.frame(Position=c(1,2,3,4,5), Beta=c(1,1,1,1,1), Model='Suspend')
+eye = data.frame(Position=c(1,2,3,4,5), Beta=c(0,0,0,0,0), Model='Perceptual')
+buffer = data.frame(Position=c(1,2,3,4,5), Beta=c(0,0.5,1,1.5, 2), Model='Incremental')
 d = rbind(rbind(eye, surprisal), buffer)
 
 ggplot(d, aes(Position, Beta)) +
@@ -442,7 +447,7 @@ buffer = function(R, m=Five, NWORDS=5, data=fitcoef) {
 o = optim(c(9), buffer, method='L-BFGS-B', lower=c(0))
 
 o
-
+# 17.79058
 ```
 
 # Vizualizing Model and Data
